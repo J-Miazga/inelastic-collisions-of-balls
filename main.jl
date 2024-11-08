@@ -24,7 +24,7 @@ function generate_circle(center::Vector{Float32}, radius::Float64, n_points::Int
     return xs, ys
 end
 function click_plot_check(state::Balls_State, position)
-    if((position[1]^2+position[2]^2)>0.81)
+    if((position[1]^2+position[2]^2)>0.8)
         return
     end
     if state.control % 2 == 1
@@ -50,8 +50,8 @@ function button_click_check(state::Balls_State, balls, mass_box, force_box)
         push!(balls, new_ball)
         push!(state_vec,state.position_of_center[1])
         push!(state_vec,state.position_of_center[2])
-        push!(state_vec,vector_force[1])
-        push!(state_vec,vector_force[2])
+        push!(state_vec,vector_force[1]/mass)
+        push!(state_vec,vector_force[2]/mass)
         state.control += 1
         mass_box.stored_string= nothing
         force_box.stored_string= nothing
@@ -118,20 +118,19 @@ on(slider_e.value) do new_e
     e[]=new_e
     label_e.text= "e = $(e[])"
 end
-on(submit.clicks) do g
+on(submit.clicks) do j
     if !toggle.active[]
         button_click_check(create_state, balls, mass_box, force_box)
     end
 end
 
-
+global no_bounces=false
 Matrix_A = zeros(Float32, 4, 4)  # 4x4 matrix of zeros
 Matrix_B = zeros(Float32, 4, 2)  # 4x2 matrix of zeros
-collision_bool=false
-global g=9.81f0
-global step=0.005f0
+const g=9.81f0
+const step=0.005f0
 state_vec=Vector{Float32}()
-new_state_vec=Vector{Float32}()
+new_state_vec=Vector{Float32}([0.0f0,0.0f0,0.0f0,0.0f0])
 input=Vector{Float32}([0.0f0,0.0f0])
 # @async begin 
 #     while true
@@ -151,33 +150,42 @@ input=Vector{Float32}([0.0f0,0.0f0])
 # end
 for i in 1:1000
     if i==1
-        input=[balls[1].force[1]/10,balls[1].force[2]/10-g*balls[1].mass]     
+        input.=[balls[1].force[1],balls[1].force[2]-g*balls[1].mass]     
+    # elseif no_bounces
+    #     input.=[g*balls[1].mass*sin(atan(-state_vec[2]/-state_vec[1])),-g*balls[1].mass]
     else
-        input=[0.0f0,-g*balls[1].mass]
+        input.=[0.0f0,-g*balls[1].mass]
     end   
-    new_state_vec=DiffEq(state_vec,input,balls[1])
-    state_vec=new_state_vec
-    if i%2==0
+    new_state_vec.=DiffEq(state_vec,input,balls[1])
+    state_vec.=new_state_vec
+    if i%2==0 && check_collison(balls[1]) && no_bounces 
+        state_vec[2]-=(state_vec[2]+sqrt(0.81-state_vec[1]^2))
+        center_vec[1][] = [state_vec[1],state_vec[2]]
+        balls[1].position=[state_vec[1],state_vec[2]]
+    elseif i%2==0
         center_vec[1][] = [state_vec[1],state_vec[2]]
     end
     balls[1].position=[state_vec[1],state_vec[2]]
-    println("Speed  Vx=$(state_vec[3])  Vy=$(state_vec[4])")
-    if check_collison(balls[1]) && collision_bool
-        continue
-    elseif !check_collison(balls[1]) && collision_bool
-        collision_bool=false
-    elseif check_collison(balls[1])
+    println("Speed  Vx=$(state_vec[3])  Vy=$(state_vec[4])")   
+    if check_collison(balls[1])
+        if abs(state_vec[3]) <0.1 && abs(state_vec[4]) <0.1 && !no_bounces && state_vec[2]<0
+            println("no bounces")
+            global no_bounces=true
+            # state_vec[3]=0.0f0
+            # state_vec[4]=0.0f0
+        end
+        if no_bounces
+            continue
+        end
         println("Zderzenie!!!!!")
         dist = sqrt(balls[1].position[1]^2+balls[1].position[2]^2)
         normal_x = balls[1].position[1] / dist
-        normal_y = balls[1].position[2] / dist
+        normal_y = balls[1].position[2] / dist 
         v_normal = state_vec[3] * normal_x + state_vec[4] * normal_y
         if v_normal > 0
             state_vec[3] =  (state_vec[3]-(2) * v_normal * normal_x)*e[] 
             state_vec[4] =  (state_vec[4]-(2) * v_normal * normal_y)*e[]
-        end
-        #state_vec[4]=-state_vec[4]*e[]
-        collision_bool=true
+        end   
     end
     sleep(step)
 end
