@@ -88,15 +88,40 @@ function check_collison(ball::Ball)
         return false
     end
 end
-function check_collision_balls(ball:Ball,j::int)
-    for each in 2:length(ball)
-        if(sqrt((ball[j].position[1]-ball[each].position[1])^2+(ball[j].position[2]-ball[each].position[2])^2)<=0.2)
-            return true
-        else 
-            return false
-        end
-    end
+function check_collision_balls(i,j)
+    if(sqrt((balls[i].position[1]-balls[j].position[1])^2+(balls[i].position[2]-balls[j].position[2])^2)<=0.2)
+        return true
+    else 
+        return false
+    end  
 end
+function calculate_collision(ball1::Ball, ball2::Ball,state1::Vector{Float32},state2::Vector{Float32})
+ # Wektor normalny między środkami
+    normal = normalize(ball2.position - ball1.position)
+    tangent = [-normal[2], normal[1]]  # Wektor styczny dla osi x i y
+    v1=[state1[3],state1[4]]
+    v2=[state2[3],state2[4]]
+    # Prędkości normalne i styczne przed zderzeniem (skalarne)
+    v1n = dot(v1, normal)
+    v2n = dot(v2, normal)
+    v1t = dot(v1, tangent)
+    v2t = dot(v2, tangent)
+
+    # Prędkości normalne po zderzeniu (z uwzględnieniem niesprężystości)
+    v1n_after = ((ball1.mass - e[] * ball2.mass) * v1n + (1 + e[]) * ball2.mass * v2n) / (ball1.mass + ball2.mass)
+    v2n_after = ((ball2.mass - e[] * ball1.mass) * v2n + (1 + e[]) * ball1.mass * v1n) / (ball1.mass + ball2.mass)
+
+    # Prędkości styczne pozostają niezmienione (brak tarcia między kulkami)
+    v1t_after = v1t
+    v2t_after = v2t
+
+    # Nowe prędkości dla osi x i y po zderzeniu
+    state1[3] = v1n_after * normal[1] + v1t_after * tangent[1]
+    state1[4] = v1n_after * normal[2] + v1t_after * tangent[2]
+    state2[3] = v2n_after * normal[1] + v2t_after * tangent[1]
+    state2[4] = v2n_after * normal[2] + v2t_after * tangent[2]
+end
+
 center_vec=Vector{Observable{Vector{Float32}}}()
 circle_points = Vector{Observable{Tuple{Vector{Float32}, Vector{Float32}}}}()
 xs = Vector{Observable{Vector{Float32}}}()
@@ -114,9 +139,9 @@ mass_box = Textbox(buttons_grid[1,1],placeholder="Mass",reset_on_defocus=true, h
 force_box = Textbox(buttons_grid[2,1],placeholder="Force",reset_on_defocus=true,height=30,width=150)
 submit = Button(buttons_grid[3,1], label="Submit",height=30,width=150)
 label_air=Label(buttons_grid[4, 1], "c= $(c[])")
-slider_air=Slider(buttons_grid[5,1], range=0:0.01:0.99,startvalue=0.0)
+slider_air=Slider(buttons_grid[5,1], range=0:0.01:1,startvalue=0.0)
 label_e=Label(buttons_grid[6, 1], "e= $(e[])")
-slider_e=Slider(buttons_grid[7,1], range=0:0.01:0.99,startvalue=0.0)
+slider_e=Slider(buttons_grid[7,1], range=0:0.01:1,startvalue=0.0)
 Label(buttons_grid[8, 1], "Run Simulation")
 toggle=Toggle(buttons_grid[9,1],height=30,width=50)
 
@@ -135,7 +160,7 @@ on(slider_e.value) do new_e
     e[]=new_e
     label_e.text= "e = $(e[])"
 end
-on(submit.clicks) do j
+on(submit.clicks) do check
     if !toggle.active[]
         button_click_check(create_state, balls, mass_box, force_box)
     end
@@ -148,7 +173,6 @@ const friction_coefficient=0.2f0
 const g=9.81f0
 const step=0.005f0
 state_vec=Vector{Vector{Float32}}()
-#new_state_vec=Vector{State}()
 input_vec=Vector{Vector{Float32}}()
 if toggle.active[]
     for i in 1:1000
@@ -169,7 +193,12 @@ if toggle.active[]
                 state_vec[j][2]-=(state_vec[j][2]+sqrt(0.81-state_vec[j][1]^2))
                 center_vec[j][] = [state_vec[j][1],state_vec[j][2]]
             elseif i%2==0
-                center_vec[j][] = [state_vec[j][1],state_vec[j][2]]     
+                if state_vec[j][1]^2+state_vec[j][2]^2 >= 1
+                    state_vec[j][1]-=(state_vec[j][1]+sqrt(0.81-state_vec[j][2]^2))
+                    state_vec[j][2]-=(state_vec[j][2]+sqrt(0.81-state_vec[j][1]^2))
+                else
+                    center_vec[j][] = [state_vec[j][1],state_vec[j][2]] 
+                end    
             end  
             
             balls[j].position=[state_vec[j][1],state_vec[j][2]]
@@ -181,6 +210,7 @@ if toggle.active[]
                 if abs(state_vec[j][3]) <0.1 && abs(state_vec[j][4]) <0.1 && !no_bounces && state_vec[j][2]<0
                     println("no bounces")
                     global no_bounces=true
+                    continue
                 end  
                 println("Zderzenie!!!!!")
                 dist = sqrt(balls[j].position[1]^2+balls[j].position[2]^2)
@@ -192,8 +222,11 @@ if toggle.active[]
                     state_vec[j][4] =  (state_vec[j][4]-(2) * v_normal * normal_y)*e[]
                 end   
             end
-            if check_collision_balls(balls,j)
-
+            for coll in j+1:length(balls)
+                if check_collision_balls(j,coll)
+                    println("Jestem")
+                    calculate_collision(balls[j],balls[coll],state_vec[j],state_vec[coll])
+                end
             end
             
         end
