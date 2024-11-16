@@ -2,8 +2,8 @@ using GLMakie
 using Observables
 using GeometryBasics
 using LinearAlgebra
-using Dates
-using Base.Threads
+#using Dates
+#using Base.Threads
 
 mutable struct Ball
     mass::Float32
@@ -36,15 +36,8 @@ function click_plot_check(ball_state::Balls_State, position)
         push!(xs, @lift $new_circle[1])
         push!(ys, @lift $new_circle[2])
         poly!(ax, xs[end], ys[end]; color=:black) 
-        # xs=@lift $new_circle[1]
-        # ys=@lift $new_circle[2]   
-        # poly!(ax, xs, ys; color=:black)
-        #push!(balls,poly!(ax, xs, ys; color=:black))
         ball_state.position_of_center = position  
-        ball_state.control += 1   
-        #push!(xs, @lift $new_circle[1])
-        #push!(ys, @lift $new_circle[2])
-        #poly!(ax, xs[end], ys[end]; color=:black)              
+        ball_state.control += 1                
     else
         ball_state.alfa = atan(position[2] - ball_state.position_of_center[2] , position[1] - ball_state.position_of_center[1])
     end
@@ -60,7 +53,7 @@ function button_click_check(ball_state::Balls_State, balls, mass_box, force_box)
         push!(input_vec,[0.0f0,0.0f0])
         push!(no_bounces,false)
         push!(during_coll,false)
-        push!(initial_kinetic_energy,0.0f0)
+        push!(initial_energy,mass*g*(ball_state.position_of_center[2]+1.0)+mass*((vector_force[1]/mass)^2+(vector_force[2]/mass)^2)/2)
         push!(counter_wall,0)
         push!(coll_time,0)
         ball_state.control += 1
@@ -125,8 +118,8 @@ function calculate_collision(ball1::Ball, ball2::Ball,state1::Vector{Float32},st
     state2[3] = v2n_after * normal[1] + v2t_after * tangent[1]
     state2[4] = v2n_after * normal[2] + v2t_after * tangent[2]
 end
-function deformation_with_wall(balls::Ball,kinetic_energy::Float32,initial_kinetic_energy::Float32,counter::Int,center::Observable,new_circle::Observable,xs::Observable,ys::Observable)  
-    alfa=kinetic_energy/initial_kinetic_energy
+function deformation_with_wall(balls::Ball,kinetic_energy::Float32,counter::Int,center::Observable,new_circle::Observable,xs::Observable,ys::Observable,initial_energy::Float32)  
+    alfa=kinetic_energy/initial_energy
     deformation_per=(1-e[])*alfa/4
     dist = sqrt(balls.position[1]^2 + balls.position[2]^2)
     if dist > 0.9
@@ -166,10 +159,11 @@ function deformation_with_wall(balls::Ball,kinetic_energy::Float32,initial_kinet
 
     xs[]= temp_x
     ys[]= temp_y
+    
 end
 function start() 
     for i in 1:1000
-        if !isopen(fig.scene)
+        if !isopen(fig.scene) || !isrunning[]
             return
         end       
         for j in 1:length(balls)            
@@ -184,14 +178,11 @@ function start()
                 if e[]!=1.0f0
                     coll_time[j]+=1 
                     kinetic_energy=balls[j].mass*(state_vec[j][3]^2+state_vec[j][4]^2)/2  
-                    if counter_wall[j]==0
-                        initial_kinetic_energy[j]=kinetic_energy
-                    end
-                    println(state_vec[j][3],"   ",state_vec[j][4])
-                    if abs(state_vec[j][3])>0.9 && abs(state_vec[j][4])>0.9  deformation_with_wall(balls[j],kinetic_energy,initial_kinetic_energy[j],coll_time[j],center_vec[j],circle_points[j],xs[j],ys[j]) end
+                  
+                    if abs(state_vec[j][3])>0.9 || abs(state_vec[j][4])>0.9  deformation_with_wall(balls[j],kinetic_energy,coll_time[j],center_vec[j],circle_points[j],xs[j],ys[j],initial_energy[j]) end
                     
                 end
-                #sleep(1)
+                
                 if coll_time[j]<9 && e[]!=1.0f0 
                     continue
                 else
@@ -248,7 +239,7 @@ function start()
             
         
           
-            state_vec[j].=DiffEq(state_vec[j],input_vec[j],balls[j],step[])
+            state_vec[j].=DiffEq(state_vec[j],input_vec[j],balls[j],step)
 
             # if check_collison(balls[j]) && no_bounces[j] 
             #     #state_vec[j][2]-=(state_vec[j][2]+sqrt(0.81-state_vec[j][1]^2))
@@ -273,7 +264,7 @@ function start()
             balls[j].position=[state_vec[j][1],state_vec[j][2]]  
             
         end 
-        sleep(step[])
+        sleep(step)
     end  
            
 end
@@ -281,21 +272,23 @@ end
 
 Matrix_A = zeros(Float32, 4, 4)  # 4x4 matrix of zeros
 Matrix_B = zeros(Float32, 4, 2)  # 4x2 matrix of zeros
+
 const g=9.81f0
-step=Observable(0.001f0)
+const step=0.002f0
+
+balls=Vector{Ball}()
 state_vec=Vector{Vector{Float32}}()
 input_vec=Vector{Vector{Float32}}()
 no_bounces=Vector{Bool}()
 during_coll=Vector{Bool}()
 counter_wall=Vector{Int}()
-initial_kinetic_energy=Vector{Float32}()
+initial_energy=Vector{Float32}()
 coll_time=Vector{Int}()
-
-
 center_vec=Vector{Observable{Vector{Float32}}}()
 circle_points = Vector{Observable{Tuple{Vector{Float32}, Vector{Float32}}}}()
 xs = Vector{Observable{Vector{Float32}}}()
 ys = Vector{Observable{Vector{Float32}}}()
+
 create_state = init_state()
 fig = Figure(size=(1920, 1080))
 display(fig)
@@ -312,14 +305,30 @@ label_air=Label(buttons_grid[4, 1], "c= $(c[])")
 slider_air=Slider(buttons_grid[5,1], range=0:0.01:1,startvalue=0.0)
 label_e=Label(buttons_grid[6, 1], "e= $(e[])")
 slider_e=Slider(buttons_grid[7,1], range=0:0.01:1,startvalue=0.0)
-label_speed=Label(buttons_grid[8, 1], "Speed")
-slider_speed=Slider(buttons_grid[9,1], range=0.001:0.001:0.01,startvalue=0.001)
-toggle=Button(buttons_grid[10,1],label="Run Simulation",height=30,width=150)
+toggle=Button(buttons_grid[8,1],label="Run Simulation",height=30,width=150)
+reset_button=Button(buttons_grid[9,1],label="Reset",height=30,width=150)
 
 isrunning=Observable(false)
 spoint = select_point(ax.scene)
-balls=Vector{Ball}()
 
+
+on(reset_button.clicks) do reset
+    isrunning[]=false
+    empty!(balls)
+    empty!(state_vec)
+    empty!(input_vec)
+    empty!(no_bounces)
+    empty!(during_coll)
+    empty!(counter_wall)
+    empty!(initial_energy)
+    empty!(coll_time)
+    empty!(center_vec)
+    empty!(circle_points)
+    empty!(xs)
+    empty!(ys)
+    empty!(ax)
+    lines!(ax,Circle(Point2f0(0.0,0.0), 1.0), color = :black, linewidth = 10)
+end
 on(spoint) do position 
     if !isrunning[]
         click_plot_check(create_state,position)
@@ -332,9 +341,6 @@ end
 on(slider_e.value) do new_e
     e[]=new_e
     label_e.text= "e = $(e[])"
-end
-on(slider_speed.value) do new_speed
-    step[]=new_speed
 end
 on(submit.clicks) do check
     if !isrunning[]
@@ -351,7 +357,7 @@ on(toggle.clicks) do click
             end
             start()
             isrunning[] = false
-            toggle.label = "RUN"
+            toggle.label = "Run"
         end
     end  
 end
