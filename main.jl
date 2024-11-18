@@ -2,8 +2,6 @@ using GLMakie
 using Observables
 using GeometryBasics
 using LinearAlgebra
-#using Dates
-#using Base.Threads
 
 mutable struct Ball
     mass::Float32
@@ -78,7 +76,7 @@ function DiffEq(state,input,new_ball::Ball,step::Float32)
     return new_state
 end
 function check_collison(ball::Ball)
-    if(sqrt(ball.position[1]^2+ball.position[2]^2)>=0.9)
+    if(sqrt(ball.position[1]^2+ball.position[2]^2)>0.9)
         return true
     else 
         return false
@@ -91,7 +89,7 @@ function check_collision_balls(i,j)
         return false
     end  
 end
-function calculate_collision(ball1::Ball, ball2::Ball,state1::Vector{Float32},state2::Vector{Float32})
+function calculate_collision_with_ball(ball1::Ball, ball2::Ball,state1::Vector{Float32},state2::Vector{Float32})
  # Wektor normalny między środkami
     
     normal = normalize(ball2.position - ball1.position)
@@ -117,6 +115,18 @@ function calculate_collision(ball1::Ball, ball2::Ball,state1::Vector{Float32},st
     state1[4] = v1n_after * normal[2] + v1t_after * tangent[2]
     state2[3] = v2n_after * normal[1] + v2t_after * tangent[1]
     state2[4] = v2n_after * normal[2] + v2t_after * tangent[2]
+   
+     
+end
+function collision_with_wall(ball1::Ball,state1::Vector{Float32})
+    dist = sqrt(ball1.position[1]^2+ball1.position[2]^2)
+    normal_x = ball1.position[1] / dist
+    normal_y = ball1.position[2] / dist 
+    v_normal = state1[3] * normal_x + state1[4] * normal_y
+    if v_normal > 0
+        state1[3] =  (state1[3]-(2) * v_normal * normal_x)*e[] 
+        state1[4] =  (state1[4]-(2) * v_normal * normal_y)*e[]
+    end 
 end
 function deformation_with_wall(balls::Ball,kinetic_energy::Float32,counter::Int,center::Observable,new_circle::Observable,xs::Observable,ys::Observable,initial_energy::Float32)  
     alfa=kinetic_energy/initial_energy
@@ -131,11 +141,11 @@ function deformation_with_wall(balls::Ball,kinetic_energy::Float32,counter::Int,
             balls.position[1] -= (dist - 0.9) * normal_x
             balls.position[2] -= (dist - 0.9) * normal_y 
         elseif counter>4
-            balls.position[1] -= 0.1*deformation_per * normal_x
-            balls.position[2] -= 0.1*deformation_per * normal_y  
+            balls.position[1] -= 0.2*deformation_per * normal_x
+            balls.position[2] -= 0.2*deformation_per * normal_y  
         else
-            balls.position[1] += 0.1*deformation_per * normal_x
-            balls.position[2] += 0.1*deformation_per * normal_y     
+            balls.position[1] += 0.2*deformation_per * normal_x
+            balls.position[2] += 0.2*deformation_per * normal_y     
         end 
         center[]=[balls.position[1],balls.position[2]]
     end
@@ -161,6 +171,57 @@ function deformation_with_wall(balls::Ball,kinetic_energy::Float32,counter::Int,
     ys[]= temp_y
     
 end
+# function deformation_with_ball(ball1::Ball,ball2::Ball,state1::Vector{Float32},state2::Vector{Float32},new_circle1::Observable,new_circle2::Observable,xs1::Observable,xs2::Observable,ys1::Observable,ys2::Observable,center1::Observable,center2::Observable)
+#     normal = normalize(ball2.position - ball1.position)
+#     #dist = norm(ball2.position - ball1.position)
+#     #target_dist = 0.08  # 40% średnicy
+#     offset = 0.06/2
+    
+#     ball1.position +=  offset * normal
+#     ball2.position -=  offset * normal
+#     center1[]=ball1.position
+#     center2[]=ball2.position
+#     println(norm(ball2.position - ball1.position))
+#     points = new_circle1[]
+#     points_x=points[1]
+#     points_y=points[2]
+#     combined = [[points_x[i], points_y[i]] for i in 1:30] 
+#     temp_x=Vector{Float32}()
+#     temp_y=Vector{Float32}()
+#     for point in combined       
+       
+#         push!(temp_x,point[1])
+#         push!(temp_y,point[2])
+#     end
+
+#     points2 = new_circle2[]
+#     points_x2=points2[1]
+#     points_y2=points2[2]
+#     combined2 = [[points_x2[i], points_y2[i]] for i in 1:30] 
+#     temp_x2=Vector{Float32}()
+#     temp_y2=Vector{Float32}()
+#     for point in combined2       
+       
+#         push!(temp_x2,point[1])
+#         push!(temp_y2,point[2])
+#     end
+    
+#     xs1[]= temp_x
+#     ys1[]= temp_y
+#     xs2[]= temp_x2
+#     ys2[]= temp_y2
+    
+# end
+function correction(state1::Vector{Float32},state2::Vector{Float32})
+    dist = sqrt((state1[1]-state2[1])^2 + (state1[2]-state2[2])^2)
+    normal_x = (state2[1] - state1[1])/ dist
+    normal_y = (state2[2] - state1[2]) / dist
+
+    state1[1] -= (0.201-dist) * normal_x/2
+    state1[2] -= (0.201-dist) * normal_y/2
+    state2[1] += (0.201-dist) * normal_x/2
+    state2[2] += (0.201-dist) * normal_y/2
+end
 function start() 
     for i in 1:1000
         if !isopen(fig.scene) || !isrunning[]
@@ -173,16 +234,13 @@ function start()
             else
                 input_vec[j].=[0.0f0,-g*balls[j].mass]            
             end  
-
+ 
             if check_collison(balls[j]) && !no_bounces[j]        
                 if e[]!=1.0f0
                     coll_time[j]+=1 
                     kinetic_energy=balls[j].mass*(state_vec[j][3]^2+state_vec[j][4]^2)/2  
-                  
-                    if abs(state_vec[j][3])>0.9 || abs(state_vec[j][4])>0.9  deformation_with_wall(balls[j],kinetic_energy,coll_time[j],center_vec[j],circle_points[j],xs[j],ys[j],initial_energy[j]) end
-                    
-                end
-                
+                    if abs(state_vec[j][3])>0.9 || abs(state_vec[j][4])>0.9  deformation_with_wall(balls[j],kinetic_energy,coll_time[j],center_vec[j],circle_points[j],xs[j],ys[j],initial_energy[j]) end     
+                end               
                 if coll_time[j]<9 && e[]!=1.0f0 
                     continue
                 else
@@ -190,31 +248,31 @@ function start()
                     if no_bounces[j]
                          continue
                     end
+                    
                     if abs(state_vec[j][3]) <0.1 && abs(state_vec[j][4]) <0.1 && !no_bounces[j] && state_vec[j][2]<0
                         no_bounces[j]=true
                         continue
                     end  
-                    dist = sqrt(balls[j].position[1]^2+balls[j].position[2]^2)
-                    normal_x = balls[j].position[1] / dist
-                    normal_y = balls[j].position[2] / dist 
-                    v_normal = state_vec[j][3] * normal_x + state_vec[j][4] * normal_y
-                    if v_normal > 0
-                        state_vec[j][3] =  (state_vec[j][3]-(2) * v_normal * normal_x)*e[] 
-                        state_vec[j][4] =  (state_vec[j][4]-(2) * v_normal * normal_y)*e[]
-                    end 
+                    collision_with_wall(balls[j],state_vec[j])
                     if e[]!=1.0f0 counter_wall[j]+=1 end
                 end
             end
             for coll in j+1:length(balls)
-                dist=sqrt((balls[j].position[1]-balls[coll].position[1])^2+(balls[j].position[2]-balls[coll].position[2])^2)
+                #dist=sqrt((balls[j].position[1]-balls[coll].position[1])^2+(balls[j].position[2]-balls[coll].position[2])^2)
                 collision_occ=check_collision_balls(j,coll)
-                if dist>0.2
-                    during_coll[j]=false    
-                    during_coll[coll]=false
+                         
+                if collision_occ
+                    correction(state_vec[j],state_vec[coll])                 
                 end
+                # if collision_occ && e[]!=1
+                #     deformation_with_ball(balls[j],balls[coll],state_vec[j],state_vec[coll],circle_points[j],circle_points[coll],xs[j],xs[coll],ys[j],ys[coll],center_vec[j],center_vec[coll])
+                #     poly!(ax, xs[j], ys[j].+0.5; color=:black) 
+                #     poly!(ax, xs[coll], ys[coll].+0.5; color=:black) 
+                #     sleep(10)
+                # else
                 if collision_occ && no_bounces[j] && no_bounces[coll] 
                     continue
-                elseif collision_occ && (no_bounces[j] || no_bounces[coll] ) && !during_coll[j] && !during_coll[coll]
+                elseif collision_occ && (no_bounces[j] || no_bounces[coll] ) 
                     if no_bounces[j]
                         normal = normalize(balls[coll].position - balls[j].position)
                         v1=[state_vec[coll][3],state_vec[coll][4]]
@@ -228,32 +286,16 @@ function start()
                         v_new = v1 .- (1 + e[]) * v1n * normal
                         state_vec[j][3],state_vec[j][4]=v_new
                     end
-                    during_coll[j]=true    
-                    during_coll[coll]=true 
-                elseif collision_occ && !during_coll[j] && !during_coll[coll]
-                    calculate_collision(balls[j],balls[coll],state_vec[j],state_vec[coll])  
-                    during_coll[j]=true    
-                    during_coll[coll]=true       
+
+                elseif collision_occ 
+                    calculate_collision_with_ball(balls[j],balls[coll],state_vec[j],state_vec[coll])       
                 end
+                #end
             end
             
         
-          
             state_vec[j].=DiffEq(state_vec[j],input_vec[j],balls[j],step)
 
-            # if check_collison(balls[j]) && no_bounces[j] 
-            #     #state_vec[j][2]-=(state_vec[j][2]+sqrt(0.81-state_vec[j][1]^2))
-            #     center_vec[j][] = [state_vec[j][1],state_vec[j][2]]
-            # else
-            #     if state_vec[j][1]^2+state_vec[j][2]^2 >= 1
-            #         #state_vec[j][1]-=(state_vec[j][1]+sqrt(0.81-state_vec[j][2]^2))
-            #         #state_vec[j][2]-=(state_vec[j][2]+sqrt(0.81-state_vec[j][1]^2))
-            #         #center_vec[j][] = [state_vec[j][1]/state_vec[j][1]^2+state_vec[j][2]^2,state_vec[j][2]/state_vec[j][1]^2+state_vec[j][2]^2] 
-            #         center_vec[j][] = [state_vec[j][1],state_vec[j][2]] 
-            #     else
-            #         center_vec[j][] = [state_vec[j][1],state_vec[j][2]] 
-            #     end  
-            # end 
             if sqrt(state_vec[j][1]^2+state_vec[j][2]^2)>0.9 
                 normal_x = state_vec[j][1] / sqrt(state_vec[j][1]^2+state_vec[j][2]^2)
                 normal_y = state_vec[j][2] / sqrt(state_vec[j][1]^2+state_vec[j][2]^2)
@@ -269,12 +311,13 @@ function start()
            
 end
 
-
-Matrix_A = zeros(Float32, 4, 4)  # 4x4 matrix of zeros
-Matrix_B = zeros(Float32, 4, 2)  # 4x2 matrix of zeros
-
 const g=9.81f0
 const step=0.002f0
+Matrix_A = zeros(Float32, 4, 4)  # 4x4 matrix of zeros
+Matrix_B = zeros(Float32, 4, 2)  # 4x2 matrix of zeros
+isrunning=Observable(false)
+c=Observable(0.0f0)
+e=Observable(0.0f0)
 
 balls=Vector{Ball}()
 state_vec=Vector{Vector{Float32}}()
@@ -294,21 +337,17 @@ fig = Figure(size=(1920, 1080))
 display(fig)
 ax = Axis(fig[1, 1],aspect=DataAspect())
 Makie.deactivate_interaction!(ax,:rectanglezoom)
-c=Observable(0.0f0)
-e=Observable(0.0f0)
 lines!(ax,Circle(Point2f0(0.0,0.0), 1.0), color = :black, linewidth = 10)
 buttons_grid= fig[1,2]= GridLayout(tellwidth=false,tellheight=false)
 mass_box = Textbox(buttons_grid[1,1],placeholder="Mass",reset_on_defocus=true, height=30,width=150)
 force_box = Textbox(buttons_grid[2,1],placeholder="Force",reset_on_defocus=true,height=30,width=150)
 submit = Button(buttons_grid[3,1], label="Submit",height=30,width=150)
 label_air=Label(buttons_grid[4, 1], "c= $(c[])")
-slider_air=Slider(buttons_grid[5,1], range=0:0.01:1,startvalue=0.0)
+slider_air=Slider(buttons_grid[5,1], range=0:0.01:5,startvalue=0.0)
 label_e=Label(buttons_grid[6, 1], "e= $(e[])")
 slider_e=Slider(buttons_grid[7,1], range=0:0.01:1,startvalue=0.0)
 toggle=Button(buttons_grid[8,1],label="Run Simulation",height=30,width=150)
 reset_button=Button(buttons_grid[9,1],label="Reset",height=30,width=150)
-
-isrunning=Observable(false)
 spoint = select_point(ax.scene)
 
 
@@ -361,10 +400,3 @@ on(toggle.clicks) do click
         end
     end  
 end
-
-
-
-
-
-
-
